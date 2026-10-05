@@ -1,0 +1,65 @@
+name: Build firmware + APK
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  firmware:
+    name: ESP32-C3 firmware
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: arduino/setup-arduino-cli@v2
+
+      - name: Install ESP32 core + libraries
+        run: |
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+          arduino-cli lib install "DHT sensor library" "Adafruit Unified Sensor"
+
+      - name: Compile
+        run: |
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32c3:CDCOnBoot=cdc \
+            --export-binaries \
+            --warnings default \
+            firmware/SmartPlantCare
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SmartPlantCare-firmware
+          path: firmware/SmartPlantCare/build/**/*.bin
+
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v4
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: "8.7"
+
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SmartPlant-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk

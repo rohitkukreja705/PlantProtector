@@ -253,6 +253,17 @@ private fun PumpCard(s: DeviceStatus, repo: PlantRepository, enabled: Boolean) {
                 FilledTonalButton(onClick = { repo.waterNow(10) }, enabled = enabled) { Text("Water 10 s") }
             }
         }
+        if (s.autoMode && s.autoHoldMin > 0 && !s.pumpOn) {
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Auto-watering paused ${s.autoHoldMin} min after manual control",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { repo.setAuto(true) }, enabled = enabled) { Text("Resume") }
+            }
+        }
         Spacer(Modifier.height(8.dp))
         HorizontalDivider()
         SwitchRow("Auto-watering", "Waters in short bursts when soil drops below the minimum", s.autoMode, enabled) {

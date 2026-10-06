@@ -53,6 +53,7 @@
 #define MAX_BURSTS           6         // bursts without improvement => tank empty?
 #define MIN_RISE_PCT         3         // moisture must rise this much over the cycle
 #define MANUAL_MAX_MS        30000UL   // hard cap for manual pump runs
+#define MANUAL_HOLD_MS       1800000UL // pause auto-watering 30 min after manual Stop/Water
 #define SENSOR_PERIOD_MS     1000UL
 #define DHT_PERIOD_MS        3000UL    // DHT11 needs >= 1 s between reads
 #define NOTIFY_PERIOD_MS     2000UL
@@ -99,6 +100,9 @@ bool  soilFault = false;
 bool autoMode   = true;
 bool muted      = false;
 bool tankEmpty  = false;       // set by dry-run protection
+bool autoHold   = false;       // auto paused after manual pump control
+unsigned long autoHoldUntil = 0;
+
 
 // Pump state machine
 enum PumpState { PUMP_IDLE, PUMP_BURST, PUMP_SOAK, PUMP_MANUAL };
@@ -119,6 +123,13 @@ long     tzOffsetSec = 19800;  // IST default, app overrides
 // Timers
 unsigned long tSensor = 0, tDht = 0, tNotify = 0, tSun = 0, tPersist = 0;
 unsigned long tDryAlarm = 0, tTankAlarm = 0;
+
+void startAutoHold() { autoHold = true; autoHoldUntil = millis() + MANUAL_HOLD_MS; }
+int  autoHoldMinutesLeft() {
+  if (!autoHold) return 0;
+  long left = (long)(autoHoldUntil - millis());
+  return left > 0 ? (int)((left + 59999) / 60000) : 0;
+}
 
 // ============================ BUZZER ==============================
 // Non-blocking pattern player: list of on/off durations in ms.
@@ -281,6 +292,10 @@ void autoWaterTick() {
 
     case PUMP_IDLE:
       if (!autoMode || tankEmpty || soilFault) return;
+      if (autoHold) {
+        if ((long)(millis() - autoHoldUntil) < 0) return;   // still paused
+        autoHold = false;
+      }
       if (soilPct < moistMin) {
         cycleStartPct = soilPct;
         burstCount = 1;
@@ -361,12 +376,12 @@ String buildStatus() {
     "{\"m\":%d,\"raw\":%d,\"t\":%s,\"h\":%s,\"l\":%d,\"lraw\":%d,"
     "\"sun\":%u,\"pump\":%d,\"soak\":%d,\"auto\":%d,\"mute\":%d,"
     "\"plant\":\"%s\",\"min\":%d,\"max\":%d,\"sunH\":%.1f,\"sunTh\":%d,"
-    "\"dry\":%d,\"wet\":%d,\"runs\":%u,\"al\":%d,\"ts\":%d,\"up\":%lu}",
+    "\"dry\":%d,\"wet\":%d,\"runs\":%u,\"al\":%d,\"ts\":%d,\"hold\":%d,\"up\":%lu}",
     soilPct, soilRaw, tbuf, hbuf, lightPct, ldrRaw,
     sunMinutes, pumpIsOn() ? 1 : 0, pumpState == PUMP_SOAK ? 1 : 0,
     autoMode ? 1 : 0, muted ? 1 : 0,
     plantId.c_str(), moistMin, moistMax, sunHoursReq, sunThresh,
-    calDry, calWet, pumpRunsToday, alarmFlags(), timeSynced ? 1 : 0,
+    calDry, calWet, pumpRunsToday, alarmFlags(), timeSynced ? 1 : 0, autoHoldMinutesLeft(),
     millis() / 1000UL);
   return String(buf);
 }
@@ -441,14 +456,16 @@ void handleCommand(const String& j) {
         unsigned long sec = (unsigned long)jsonNum(j, "sec", 5);
         manualRunMs = min(sec * 1000UL, MANUAL_MAX_MS);
         burstCount = 0;
+        startAutoHold();                        // let the water soak in before auto re-checks
         pumpStart(PUMP_MANUAL);
-      } else if (pumpIsOn() || pumpState == PUMP_SOAK) {
+      } else {
         burstCount = 0;
-        pumpStop(PUMP_IDLE);
+        startAutoHold();                        // Stop means stop: don't restart right away
+        if (pumpIsOn() || pumpState == PUMP_SOAK) pumpStop(PUMP_IDLE);
       }
     } else if (cmd == "auto") {
       autoMode = jsonNum(j, "on", 1) != 0;
-      if (autoMode) tankEmpty = false;          // re-enabling clears the lockout
+      if (autoMode) { tankEmpty = false; autoHold = false; }  // re-enabling clears lockout + pause
       prefs.putBool("auto", autoMode);
       if (!autoMode && pumpState != PUMP_MANUAL && pumpState != PUMP_IDLE) pumpStop(PUMP_IDLE);
     } else if (cmd == "resetTank") {

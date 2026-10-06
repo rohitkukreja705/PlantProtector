@@ -25,6 +25,7 @@ data class DeviceStatus(
     val pumpRunsToday: Int,
     val alarmFlags: Int,
     val timeSynced: Boolean,
+    val autoHoldMin: Int,
     val uptimeSec: Long,
 ) {
     val tankEmpty get() = alarmFlags and 8 != 0
@@ -57,6 +58,7 @@ data class DeviceStatus(
                 pumpRunsToday = o.optInt("runs"),
                 alarmFlags = o.optInt("al"),
                 timeSynced = o.optInt("ts") == 1,
+                autoHoldMin = o.optInt("hold"),
                 uptimeSec = o.optLong("up"),
             )
         } catch (e: Exception) {
